@@ -6,6 +6,7 @@ class SplitRequest(BaseModel):
     tone: str = "professional"  # professional, casual, viral, witty, academic
     platforms: list[str] = ["twitter", "linkedin", "instagram", "telegram", "tiktok"]
     tags: str = ""
+    model: str = ""  # optional: override LLM model
 
 
 class AdaptationResponse(BaseModel):
@@ -24,6 +25,7 @@ class PostResponse(BaseModel):
     tags: str
     created_at: str
     adaptations: list[AdaptationResponse]
+    model: str = ""
 
 
 class PostListItem(BaseModel):

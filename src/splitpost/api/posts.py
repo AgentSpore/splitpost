@@ -1,12 +1,30 @@
 from fastapi import APIRouter, HTTPException
 
+from ..core.config import settings
 from ..core.deps import DbDep, UserDep
 from ..schemas.post import SplitRequest, PostResponse, AdaptationResponse, PostListItem
-from ..services.adapt_service import adapt_content
+from ..services.adapt_service import adapt_content, AdaptError
 from ..services.platform_rules import PLATFORMS
 from ..repositories import post_repo
 
 router = APIRouter(prefix="/posts", tags=["posts"])
+
+FREE_MODELS = [
+    {"id": "google/gemini-2.0-flash-001", "name": "Gemini 2.0 Flash"},
+    {"id": "google/gemini-2.5-flash-preview", "name": "Gemini 2.5 Flash"},
+    {"id": "deepseek/deepseek-chat-v3-0324:free", "name": "DeepSeek V3"},
+    {"id": "meta-llama/llama-4-maverick:free", "name": "Llama 4 Maverick"},
+    {"id": "qwen/qwen3-235b-a22b:free", "name": "Qwen3 235B"},
+]
+
+
+@router.get("/config")
+async def get_config():
+    return {
+        "default_model": settings.llm_model,
+        "models": FREE_MODELS,
+        "has_api_key": bool(settings.openrouter_api_key),
+    }
 
 
 @router.post("/split", response_model=PostResponse)
@@ -20,13 +38,18 @@ async def split_post(req: SplitRequest, user: UserDep, db: DbDep):
     if not valid_platforms:
         raise HTTPException(400, f"No valid platforms. Choose from: {list(PLATFORMS.keys())}")
 
-    adaptations = await adapt_content(req.text, req.tone, valid_platforms, req.tags)
+    try:
+        result = await adapt_content(req.text, req.tone, valid_platforms, req.tags, req.model)
+    except AdaptError as e:
+        raise HTTPException(502, str(e))
 
     post_id = await post_repo.create_post(db, user["id"], req.text, req.tone, req.tags)
-    await post_repo.save_adaptations(db, post_id, adaptations)
+    await post_repo.save_adaptations(db, post_id, result["adaptations"])
 
     post = await post_repo.get_post_with_adaptations(db, post_id, user["id"])
-    return _format_post(post)
+    resp = _format_post(post)
+    resp.model = result["model"]
+    return resp
 
 
 @router.get("/", response_model=list[PostListItem])

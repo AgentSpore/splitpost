@@ -534,6 +534,41 @@ body::before {
 .tags-input:focus { border-color: var(--accent); }
 .tags-input::placeholder { color: var(--text-muted); }
 
+.model-select {
+  width: 100%;
+  padding: 9px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a5a5e' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+.model-select:focus { border-color: var(--accent); }
+.model-select option { background: var(--bg-card); color: var(--text); }
+
+.results-model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-bottom: 14px;
+}
+.results-model-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+
 .composer-actions {
   display: flex;
   justify-content: flex-end;
@@ -1210,6 +1245,11 @@ body::before {
               <div class="option-label">Tags</div>
               <input class="tags-input" id="tagsInput" placeholder="marketing, launch, ai…">
             </div>
+
+            <div class="option-group" style="min-width:200px;">
+              <div class="option-label">Model</div>
+              <select class="model-select" id="modelSelect"></select>
+            </div>
           </div>
 
           <div class="composer-actions">
@@ -1242,6 +1282,8 @@ let token = localStorage.getItem('sp_token');
 let currentUser = null;
 let currentTone = 'professional';
 let activePlatforms = new Set(['twitter', 'linkedin', 'instagram', 'telegram', 'tiktok']);
+let availableModels = [];
+let defaultModel = '';
 
 const PLATFORM_META = {
   twitter:   { name: 'Twitter / X', icon: '𝕏', limit: 280 },
@@ -1329,6 +1371,18 @@ document.getElementById('registerForm').addEventListener('submit', async e => {
 });
 
 // ═══ APP INIT ═══
+async function loadModels() {
+  try {
+    const cfg = await api('/posts/config');
+    availableModels = cfg.models || [];
+    defaultModel = cfg.default_model || '';
+    const select = document.getElementById('modelSelect');
+    select.innerHTML = availableModels.map(m =>
+      `<option value="${m.id}" ${m.id === defaultModel ? 'selected' : ''}>${m.name}</option>`
+    ).join('');
+  } catch {}
+}
+
 async function showApp() {
   if (!currentUser) {
     try { currentUser = await api('/auth/me'); } catch { return signOut(); }
@@ -1337,6 +1391,7 @@ async function showApp() {
   document.getElementById('appScreen').classList.remove('hidden');
   document.getElementById('userName').textContent = currentUser.display_name || currentUser.username;
   document.getElementById('userAvatar').textContent = (currentUser.display_name || currentUser.username)[0].toUpperCase();
+  loadModels();
 }
 
 function signOut() {
@@ -1423,6 +1478,7 @@ document.getElementById('splitBtn').addEventListener('click', async () => {
   `).join('')}</div>`;
 
   try {
+    const selectedModel = document.getElementById('modelSelect').value;
     const data = await api('/posts/split', {
       method: 'POST',
       body: JSON.stringify({
@@ -1430,9 +1486,10 @@ document.getElementById('splitBtn').addEventListener('click', async () => {
         tone: currentTone,
         platforms: [...activePlatforms],
         tags: document.getElementById('tagsInput').value,
+        model: selectedModel,
       }),
     });
-    renderResults(data.adaptations);
+    renderResults(data.adaptations, data.model);
     toast(`Split into ${data.adaptations.length} platforms`);
   } catch (err) {
     resultsSection.innerHTML = '';
@@ -1443,9 +1500,11 @@ document.getElementById('splitBtn').addEventListener('click', async () => {
   }
 });
 
-function renderResults(adaptations) {
+function renderResults(adaptations, model) {
   const section = document.getElementById('resultsSection');
-  section.innerHTML = `<div class="results-grid">${adaptations.map(a => {
+  const modelName = availableModels.find(m => m.id === model)?.name || model || '';
+  const badge = model ? `<div class="results-model-badge"><span class="dot"></span>${modelName}</div>` : '';
+  section.innerHTML = `${badge}<div class="results-grid">${adaptations.map(a => {
     const meta = PLATFORM_META[a.platform] || {};
     const pct = Math.min((a.char_count / a.char_limit) * 100, 100);
     const barColor = pct < 70 ? 'green' : pct < 90 ? 'yellow' : 'red';

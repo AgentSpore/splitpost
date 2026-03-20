@@ -34,9 +34,18 @@ Return ONLY valid JSON (no markdown fences):
 If content exceeds a platform's limit, add a warning. Never truncate silently."""
 
 
-async def adapt_content(text: str, tone: str, platforms: list[str], tags: str) -> list[dict]:
+class AdaptError(Exception):
+    """Raised when LLM adaptation fails."""
+    pass
+
+
+async def adapt_content(text: str, tone: str, platforms: list[str], tags: str, model: str = "") -> dict:
+    """Returns {"adaptations": [...], "model": str, "ai_used": True}
+    Raises AdaptError on any failure."""
+    used_model = model or settings.llm_model
+
     if not settings.openrouter_api_key:
-        return _fallback_adapt(text, tone, platforms, tags)
+        raise AdaptError("No API key configured. Set SP_OPENROUTER_API_KEY or OPENROUTER_API_KEY.")
 
     tone_desc = TONES.get(tone, TONES["professional"])
     platform_specs = []
@@ -64,7 +73,7 @@ Original content:
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": f"Bearer {settings.openrouter_api_key}"},
                 json={
-                    "model": settings.llm_model,
+                    "model": used_model,
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": user_msg},
@@ -73,6 +82,11 @@ Original content:
                 },
             )
             data = resp.json()
+
+            if "error" in data:
+                err_msg = data["error"].get("message", str(data["error"])) if isinstance(data["error"], dict) else str(data["error"])
+                raise AdaptError(f"LLM error: {err_msg}")
+
             content = data["choices"][0]["message"]["content"]
             if content.startswith("```"):
                 content = content.split("\n", 1)[1].rsplit("```", 1)[0]
@@ -96,30 +110,13 @@ Original content:
                     "hashtags": a.get("hashtags", []),
                     "warnings": warnings,
                 })
-            return adaptations
 
+            if not adaptations:
+                raise AdaptError("LLM returned empty adaptations")
+
+            return {"adaptations": adaptations, "model": used_model, "ai_used": True}
+
+    except AdaptError:
+        raise
     except Exception as e:
-        return _fallback_adapt(text, tone, platforms, tags)
-
-
-def _fallback_adapt(text: str, tone: str, platforms: list[str], tags: str) -> list[dict]:
-    """Simple fallback when no API key."""
-    adaptations = []
-    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
-    hashtags = [f"#{t.replace(' ', '')}" for t in tag_list[:5]]
-
-    for p in platforms:
-        spec = PLATFORMS.get(p)
-        if not spec:
-            continue
-        limit = spec["char_limit"]
-        truncated = text[:limit] if len(text) > limit else text
-        adaptations.append({
-            "platform": p,
-            "content": truncated,
-            "char_count": len(truncated),
-            "char_limit": limit,
-            "hashtags": hashtags[:spec["hashtag_count"]],
-            "warnings": ["AI unavailable — showing truncated original"] if len(text) > limit else [],
-        })
-    return adaptations
+        raise AdaptError(f"Failed to connect to AI: {e}")
