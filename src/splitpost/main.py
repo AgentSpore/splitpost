@@ -5,13 +5,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 
+from .core.config import settings
 from .core.database import init_db, close_db
 from .api import auth, posts, health
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db()
+    await init_db(settings.db_path)
     yield
     await close_db()
 
