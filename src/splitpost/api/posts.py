@@ -1,3 +1,6 @@
+import time
+import httpx
+
 from fastapi import APIRouter, HTTPException
 
 from ..core.config import settings
@@ -9,20 +12,46 @@ from ..repositories import post_repo
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 
-FREE_MODELS = [
-    {"id": "google/gemini-2.0-flash-001", "name": "Gemini 2.0 Flash"},
-    {"id": "google/gemini-2.5-flash-preview", "name": "Gemini 2.5 Flash"},
-    {"id": "deepseek/deepseek-chat-v3-0324:free", "name": "DeepSeek V3"},
-    {"id": "meta-llama/llama-4-maverick:free", "name": "Llama 4 Maverick"},
-    {"id": "qwen/qwen3-235b-a22b:free", "name": "Qwen3 235B"},
-]
+_models_cache: list[dict] = []
+_models_cache_ts: float = 0
+CACHE_TTL = 3600  # 1 hour
+
+
+async def _fetch_free_models() -> list[dict]:
+    global _models_cache, _models_cache_ts
+    if _models_cache and time.time() - _models_cache_ts < CACHE_TTL:
+        return _models_cache
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get("https://openrouter.ai/api/v1/models")
+            data = resp.json()
+            models = []
+            for m in data.get("data", []):
+                pricing = m.get("pricing", {})
+                if pricing.get("prompt") == "0" and pricing.get("completion") == "0":
+                    modalities = m.get("architecture", {}).get("output_modalities", [])
+                    if "text" not in modalities:
+                        continue
+                    models.append({
+                        "id": m["id"],
+                        "name": m.get("name", m["id"]),
+                        "context_length": m.get("context_length", 0),
+                    })
+            models.sort(key=lambda x: x["name"])
+            _models_cache = models
+            _models_cache_ts = time.time()
+            return models
+    except Exception:
+        return _models_cache or []
 
 
 @router.get("/config")
 async def get_config():
+    models = await _fetch_free_models()
     return {
         "default_model": settings.llm_model,
-        "models": FREE_MODELS,
+        "models": models,
         "has_api_key": bool(settings.openrouter_api_key),
     }
 

@@ -534,7 +534,8 @@ body::before {
 .tags-input:focus { border-color: var(--accent); }
 .tags-input::placeholder { color: var(--text-muted); }
 
-.model-select {
+.model-picker { position: relative; }
+.model-search {
   width: 100%;
   padding: 9px 14px;
   background: var(--bg-input);
@@ -544,15 +545,36 @@ body::before {
   font-family: var(--font-mono);
   font-size: 0.8rem;
   outline: none;
-  cursor: pointer;
   transition: border-color 0.2s;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235a5a5e' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
 }
-.model-select:focus { border-color: var(--accent); }
-.model-select option { background: var(--bg-card); color: var(--text); }
+.model-search:focus { border-color: var(--accent); }
+.model-search::placeholder { color: var(--text-muted); }
+.model-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 50;
+}
+.model-option {
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.model-option:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+.model-option.selected { background: rgba(255,107,53,0.1); color: var(--accent); }
 
 .results-model-badge {
   display: inline-flex;
@@ -1246,9 +1268,13 @@ body::before {
               <input class="tags-input" id="tagsInput" placeholder="marketing, launch, ai…">
             </div>
 
-            <div class="option-group" style="min-width:200px;">
-              <div class="option-label">Model</div>
-              <select class="model-select" id="modelSelect"></select>
+            <div class="option-group" style="min-width:240px;">
+              <div class="option-label">Model (free)</div>
+              <div class="model-picker" id="modelPicker">
+                <input class="model-search" id="modelSearch" placeholder="Search models..." autocomplete="off">
+                <div class="model-dropdown hidden" id="modelDropdown"></div>
+                <input type="hidden" id="modelSelect">
+              </div>
             </div>
           </div>
 
@@ -1376,12 +1402,41 @@ async function loadModels() {
     const cfg = await api('/posts/config');
     availableModels = cfg.models || [];
     defaultModel = cfg.default_model || '';
-    const select = document.getElementById('modelSelect');
-    select.innerHTML = availableModels.map(m =>
-      `<option value="${m.id}" ${m.id === defaultModel ? 'selected' : ''}>${m.name}</option>`
-    ).join('');
+    document.getElementById('modelSelect').value = defaultModel;
+    const def = availableModels.find(m => m.id === defaultModel);
+    document.getElementById('modelSearch').value = def ? def.name : defaultModel;
+    renderModelDropdown('');
   } catch {}
 }
+
+function renderModelDropdown(query) {
+  const dd = document.getElementById('modelDropdown');
+  const q = query.toLowerCase();
+  const filtered = q ? availableModels.filter(m => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)) : availableModels;
+  const selected = document.getElementById('modelSelect').value;
+  dd.innerHTML = filtered.slice(0, 50).map(m =>
+    `<div class="model-option ${m.id === selected ? 'selected' : ''}" data-id="${m.id}">${m.name}</div>`
+  ).join('') || '<div class="model-option" style="color:var(--text-muted);pointer-events:none">No models found</div>';
+}
+
+document.getElementById('modelSearch').addEventListener('focus', () => {
+  document.getElementById('modelDropdown').classList.remove('hidden');
+  renderModelDropdown(document.getElementById('modelSearch').value);
+});
+document.getElementById('modelSearch').addEventListener('input', e => {
+  document.getElementById('modelDropdown').classList.remove('hidden');
+  renderModelDropdown(e.target.value);
+});
+document.getElementById('modelDropdown').addEventListener('click', e => {
+  const opt = e.target.closest('.model-option');
+  if (!opt || !opt.dataset.id) return;
+  document.getElementById('modelSelect').value = opt.dataset.id;
+  document.getElementById('modelSearch').value = opt.textContent;
+  document.getElementById('modelDropdown').classList.add('hidden');
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('#modelPicker')) document.getElementById('modelDropdown').classList.add('hidden');
+});
 
 async function showApp() {
   if (!currentUser) {
