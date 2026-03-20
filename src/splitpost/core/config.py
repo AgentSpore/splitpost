@@ -1,3 +1,5 @@
+import os
+
 from pydantic_settings import BaseSettings
 
 
@@ -21,3 +23,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Fallback: use OPENROUTER_API_KEY if SP_OPENROUTER_API_KEY not set
+if not settings.openrouter_api_key:
+    settings.openrouter_api_key = os.environ.get("OPENROUTER_API_KEY", "")
